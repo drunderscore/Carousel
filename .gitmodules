@@ -1,0 +1,7 @@
+[submodule "imgui"]
+	path = imgui
+	url = https://github.com/ocornut/imgui
+	branch = docking
+[submodule "JMP"]
+	path = JMP
+	url = https://github.com/drunderscore/JMP
