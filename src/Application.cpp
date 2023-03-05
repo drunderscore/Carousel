@@ -19,6 +19,9 @@ namespace Carousel
 {
 Application::Application()
 {
+    m_playback_device.pUserData = nullptr;
+    m_audio_context.pUserData = nullptr;
+
     JMP::ScopeGuard free_if_error_occurs([this]() {
         if (m_window)
         {
@@ -30,6 +33,18 @@ Application::Application()
         {
             NDIlib_find_destroy(m_ndi_finder_instance);
             m_ndi_finder_instance = nullptr;
+        }
+
+        if (m_playback_device.pUserData)
+        {
+            ma_device_uninit(&m_playback_device);
+            m_playback_device.pUserData = nullptr;
+        }
+
+        if (m_audio_context.pUserData)
+        {
+            ma_context_uninit(&m_audio_context);
+            m_audio_context.pUserData = nullptr;
         }
     });
 
@@ -48,6 +63,26 @@ Application::Application()
 
     if (!gladLoadGL(glfwGetProcAddress))
         throw std::runtime_error("Failed to load GLAD");
+
+    auto audio_context_config = ma_context_config_init();
+    // Just so we know if this was successfully initialized or not.
+    audio_context_config.pUserData = this;
+    if (ma_context_init(nullptr, 0, &audio_context_config, &m_audio_context) != MA_SUCCESS)
+        throw std::runtime_error("Failed to initialize miniaudio context");
+
+    ma_device_info* playback_device_infos{};
+    ma_uint32 number_of_playback_device_infos{};
+
+    // Note: The pointers returned here stay alive until the next call to this function, or context uninit, so they'll
+    // live long enough.
+    if (ma_context_get_devices(&m_audio_context, &playback_device_infos, &number_of_playback_device_infos, nullptr,
+                               nullptr) != MA_SUCCESS)
+        throw std::runtime_error("Failed to get all playback devices from miniaudio");
+
+    m_playback_device_infos = {playback_device_infos, number_of_playback_device_infos};
+
+    if (!initialize_playback_device(nullptr))
+        fprintf(stderr, "Failed to initialize default playback device, there will be no audio!\n");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -75,6 +110,18 @@ Application::~Application()
     {
         NDIlib_find_destroy(m_ndi_finder_instance);
         m_ndi_finder_instance = nullptr;
+    }
+
+    if (m_playback_device.pUserData)
+    {
+        ma_device_uninit(&m_playback_device);
+        m_playback_device.pUserData = nullptr;
+    }
+
+    if (m_audio_context.pUserData)
+    {
+        ma_context_uninit(&m_audio_context);
+        m_audio_context.pUserData = nullptr;
     }
 }
 
@@ -149,29 +196,59 @@ int Application::run()
 
                 ImGui::EndMenu();
             }
+
+            if (ImGui::BeginMenu("Audio"))
+            {
+                ImGui::MenuItem("Focused Window Only", nullptr, &m_only_play_audio_from_focused_window);
+                if (ImGui::BeginMenu("Playback Device"))
+                {
+                    std::string_view playback_device_name(m_playback_device.playback.name);
+
+                    for (auto& playback_device_info : m_playback_device_infos)
+                    {
+                        auto is_current_playback_device = playback_device_name == playback_device_info.name;
+
+                        // FIXME: This is comparing the device name, which is not the ID! How are you meant to compare
+                        //        device IDs with miniaudio? Doesn't seem to be an API for this...
+                        if (ImGui::MenuItem(playback_device_info.name, nullptr, is_current_playback_device,
+                                            !is_current_playback_device))
+                            initialize_playback_device(&playback_device_info);
+                    }
+
+                    ImGui::EndMenu();
+                }
+
+                ImGui::EndMenu();
+            }
+
             ImGui::EndMainMenuBar();
         }
 
-        for (auto ndi_connection_iterator = m_ndi_source_windows.begin();
-             ndi_connection_iterator != m_ndi_source_windows.end();)
         {
-            bool should_remove_source_window;
+            std::lock_guard ndi_source_windows_lock(m_ndi_source_windows_mutex);
 
-            try
+            for (auto ndi_connection_iterator = m_ndi_source_windows.begin();
+                 ndi_connection_iterator != m_ndi_source_windows.end();)
             {
-                should_remove_source_window = (*ndi_connection_iterator)->update();
-            }
-            catch (const std::exception& ex)
-            {
-                fprintf(stderr, "Threw exception whilst updating source window: %s\n", ex.what());
-                should_remove_source_window = true;
-            }
+                bool should_remove_source_window;
 
-            if (should_remove_source_window)
-                ndi_connection_iterator = m_ndi_source_windows.erase(ndi_connection_iterator);
-            else
-                ndi_connection_iterator++;
+                try
+                {
+                    should_remove_source_window = (*ndi_connection_iterator)->update();
+                }
+                catch (const std::exception& ex)
+                {
+                    fprintf(stderr, "Threw exception whilst updating source window: %s\n", ex.what());
+                    should_remove_source_window = true;
+                }
+
+                if (should_remove_source_window)
+                    ndi_connection_iterator = m_ndi_source_windows.erase(ndi_connection_iterator);
+                else
+                    ndi_connection_iterator++;
+            }
         }
+
         ImGui::Render();
 
         glClear(GL_COLOR_BUFFER_BIT);
@@ -193,5 +270,77 @@ void Application::create_finder()
 
     if (!(m_ndi_finder_instance = NDIlib_find_create_v2()))
         throw std::runtime_error("Failed to create NDI finder instance");
+}
+
+bool Application::initialize_playback_device(ma_device_info* device_info)
+{
+    if (m_playback_device.pUserData)
+    {
+        ma_device_uninit(&m_playback_device);
+        m_playback_device.pUserData = nullptr;
+    }
+
+    auto playback_device_config = ma_device_config_init(ma_device_type_playback);
+    // We don't have to set the number of channels or sample rate here, the device defaults are better anyway.
+    playback_device_config.playback.pDeviceID = !device_info ? nullptr : &device_info->id;
+    playback_device_config.playback.format = ma_format_f32;
+    playback_device_config.dataCallback = miniaudio_playback_data_callback;
+    playback_device_config.pUserData = this;
+
+    if (ma_device_init(nullptr, &playback_device_config, &m_playback_device) == MA_SUCCESS)
+        return ma_device_start(&m_playback_device) == MA_SUCCESS;
+
+    return false;
+}
+
+void Application::miniaudio_playback_data_callback(ma_device* device, void* output, const void*, ma_uint32 frame_count)
+{
+    auto& application = *reinterpret_cast<Application*>(device->pUserData);
+    auto output_floats = reinterpret_cast<float*>(output);
+
+    std::lock_guard ndi_source_windows_lock(application.m_ndi_source_windows_mutex);
+    if (application.m_ndi_source_windows.empty())
+        return;
+
+    auto total_number_of_frames_for_all_channels = frame_count * device->playback.channels;
+    float samples_for_this_source[total_number_of_frames_for_all_channels];
+
+    for (auto& ndi_source_window : application.m_ndi_source_windows)
+    {
+        NDIlib_audio_frame_v2_t audio_frame;
+        // Even if the source window is muted, we need to consume the capture for the sync... I think.
+        // Without this, muting and unmuting the audio rapidly for a few seconds quickly made it desync. It doesn't cost
+        // us much to do this anyhow.
+        NDIlib_framesync_capture_audio(ndi_source_window->framesync_instance(), &audio_frame,
+                                       static_cast<int>(device->playback.internalSampleRate),
+                                       static_cast<int>(device->playback.channels), static_cast<int>(frame_count));
+
+        JMP::ScopeGuard free_audio_frame = [&ndi_source_window, &audio_frame]() {
+            NDIlib_framesync_free_audio(ndi_source_window->framesync_instance(), &audio_frame);
+        };
+
+        if (application.m_only_play_audio_from_focused_window && !ndi_source_window->is_window_focused() ||
+            ndi_source_window->is_audio_muted())
+            continue;
+
+        NDIlib_audio_frame_interleaved_32f_t audio_frame_interleaved_floats;
+        audio_frame_interleaved_floats.no_channels = static_cast<int>(device->playback.channels);
+        audio_frame_interleaved_floats.sample_rate = static_cast<int>(device->playback.internalSampleRate);
+        audio_frame_interleaved_floats.no_samples = static_cast<int>(frame_count);
+        audio_frame_interleaved_floats.p_data = samples_for_this_source;
+
+        NDIlib_util_audio_to_interleaved_32f_v2(&audio_frame, &audio_frame_interleaved_floats);
+
+        for (auto i = 0; i < total_number_of_frames_for_all_channels; i++)
+        {
+            auto mixed = std::clamp(output_floats[i] + (samples_for_this_source[i] * ndi_source_window->audio_volume()),
+                                    -1.0f, 1.0f);
+            output_floats[i] = mixed;
+        }
+
+        // Note: We can't break early from this loop even if m_only_play_audio_from_focused_window is true, because of
+        // the observed potential desync issues observed with NDIlib_framesync_capture_audio described above -- we need
+        // to be sure to at least consume the audio from all sources.
+    }
 }
 }

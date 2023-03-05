@@ -14,12 +14,36 @@ namespace Carousel
 {
 NDISourceWindow::NDISourceWindow(const NDIlib_source_t& source) : m_source(source)
 {
-    create_receiver(m_receiver_bandwidth);
+    JMP::ScopeGuard free_if_error_occurs = [this]() {
+        // NDI says: You should always destroy the receiver after the frame-sync has been destroyed.
+        if (m_framesync_instance)
+        {
+            NDIlib_framesync_destroy(m_framesync_instance);
+            m_framesync_instance = nullptr;
+        }
+
+        if (m_receiver_instance)
+        {
+            NDIlib_recv_destroy(m_receiver_instance);
+            m_receiver_instance = nullptr;
+        }
+    };
+
+    create_receiver_and_framesync(m_receiver_bandwidth);
     set_frame_texture_filtering(m_frame_texture_filtering);
+
+    free_if_error_occurs.disarm();
 }
 
 NDISourceWindow::~NDISourceWindow()
 {
+    // NDI says: You should always destroy the receiver after the frame-sync has been destroyed.
+    if (m_framesync_instance)
+    {
+        NDIlib_framesync_destroy(m_framesync_instance);
+        m_framesync_instance = nullptr;
+    }
+
     if (m_receiver_instance)
     {
         NDIlib_recv_destroy(m_receiver_instance);
@@ -55,6 +79,7 @@ bool NDISourceWindow::update()
 
     if (ImGui::Begin(m_source.m_name.c_str(), &m_is_window_open) && m_is_window_open)
     {
+        m_is_window_focused = ImGui::IsWindowFocused();
         auto texture_size = ImGui::GetContentRegionAvail();
 
         // If we didn't end up setting the windows size constraints, size constrain the texture instead.
@@ -81,13 +106,13 @@ bool NDISourceWindow::update()
             if (ImGui::MenuItem("Highest", nullptr, m_receiver_bandwidth == NDIlib_recv_bandwidth_highest))
             {
                 m_receiver_bandwidth = NDIlib_recv_bandwidth_highest;
-                create_receiver(m_receiver_bandwidth);
+                create_receiver_and_framesync(m_receiver_bandwidth);
             }
 
             if (ImGui::MenuItem("Lowest", nullptr, m_receiver_bandwidth == NDIlib_recv_bandwidth_lowest))
             {
                 m_receiver_bandwidth = NDIlib_recv_bandwidth_lowest;
-                create_receiver(m_receiver_bandwidth);
+                create_receiver_and_framesync(m_receiver_bandwidth);
             }
 
             ImGui::EndMenu();
@@ -114,6 +139,14 @@ bool NDISourceWindow::update()
             ImGui::SetWindowSize(m_source.m_name.c_str(),
                                  ImVec2(static_cast<float>(width), static_cast<float>(height)));
 
+        if (ImGui::BeginMenu("Audio"))
+        {
+            ImGui::SliderFloat("Volume", &m_audio_volume, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SameLine();
+            ImGui::Checkbox("Mute", &m_audio_muted);
+            ImGui::EndMenu();
+        }
+
         ImGui::EndPopup();
     }
 
@@ -122,8 +155,15 @@ bool NDISourceWindow::update()
     return !m_is_window_open;
 }
 
-void NDISourceWindow::create_receiver(NDIlib_recv_bandwidth_e bandwidth)
+void NDISourceWindow::create_receiver_and_framesync(NDIlib_recv_bandwidth_e bandwidth)
 {
+    // NDI says: You should always destroy the receiver after the frame-sync has been destroyed.
+    if (m_framesync_instance)
+    {
+        NDIlib_framesync_destroy(m_framesync_instance);
+        m_framesync_instance = nullptr;
+    }
+
     if (m_receiver_instance)
     {
         NDIlib_recv_destroy(m_receiver_instance);
@@ -139,26 +179,33 @@ void NDISourceWindow::create_receiver(NDIlib_recv_bandwidth_e bandwidth)
 
     if (!(m_receiver_instance = NDIlib_recv_create_v3(&receiver_create)))
         throw std::runtime_error("Failed to create NDI receiver instance");
+
+    if (!(m_framesync_instance = NDIlib_framesync_create(m_receiver_instance)))
+        throw std::runtime_error("Failed to create NDI framesync instance");
 }
 
 void NDISourceWindow::receive()
 {
     NDIlib_video_frame_v2_t video_frame{};
+    NDIlib_framesync_capture_video(m_framesync_instance, &video_frame);
 
-    if (auto frame_type = NDIlib_recv_capture_v3(m_receiver_instance, &video_frame, nullptr, nullptr, 0);
-        frame_type == NDIlib_frame_type_video)
+    // With framesync, it's possible (and likely) we'll get the same frame multiple times. Don't update the texture if
+    // the frame hasn't changed.
+    //
+    // If we have not received even a single frame yet, NDI says:
+    // "this will return NDIlib_video_frame_v2_t as an empty (all zero) structure"
+    // So, check for p_data to be something first before checking the timecode.
+    if (video_frame.p_data && video_frame.timecode != m_frame_timecode)
     {
         m_frame_texture.with_bound([&video_frame]() {
             JMP::GL::Texture2D::set_data(0, GL_RGBA, video_frame.xres, video_frame.yres, GL_RGBA, GL_UNSIGNED_BYTE,
                                          video_frame.p_data);
         });
 
-        NDIlib_recv_free_video_v2(m_receiver_instance, &video_frame);
+        m_frame_timecode = video_frame.timecode;
     }
-    else if (frame_type == NDIlib_frame_type_error)
-    {
-        throw std::runtime_error("Received error frame from NDI source");
-    }
+
+    NDIlib_framesync_free_video(m_framesync_instance, &video_frame);
 }
 
 void NDISourceWindow::set_frame_texture_filtering(GLint filtering)

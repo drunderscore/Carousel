@@ -5,3 +5,6 @@
 [submodule "JMP"]
 	path = JMP
 	url = https://github.com/drunderscore/JMP
+[submodule "miniaudio"]
+	path = miniaudio
+	url = https://github.com/mackron/miniaudio

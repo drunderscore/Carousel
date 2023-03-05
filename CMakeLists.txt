@@ -29,7 +29,7 @@ add_executable(Carousel
         src/NDISourceWindow.cpp
         )
 
-target_include_directories(Carousel SYSTEM PRIVATE imgui ${PROJECT_SOURCE_DIR} JMP/src)
+target_include_directories(Carousel SYSTEM PRIVATE imgui ${PROJECT_SOURCE_DIR} JMP/src miniaudio)
 # FIXME: This doesn't link to NDI on Windows properly, because the library is differently named
 # FIXME: I believe glfw on Windows is actually glfw3, for some reason
 target_link_libraries(Carousel PRIVATE imgui glfw JMP ndi)

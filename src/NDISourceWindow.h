@@ -41,18 +41,29 @@ public:
     NDISourceWindow(const NDISourceWindow&) = delete;
 
     const Source& source() const { return m_source; }
+    NDIlib_framesync_instance_t framesync_instance() const { return m_framesync_instance; }
+    float audio_volume() const { return m_audio_volume; }
+    bool is_audio_muted() const { return m_audio_muted; }
+    bool is_window_focused() const { return m_is_window_focused; }
 
     bool update();
 
 private:
     bool m_is_window_open = true;
+    bool m_is_window_focused{};
     Source m_source;
     NDIlib_recv_instance_t m_receiver_instance{};
+    NDIlib_framesync_instance_t m_framesync_instance{};
     JMP::GL::Texture2D m_frame_texture;
     NDIlib_recv_bandwidth_e m_receiver_bandwidth = NDIlib_recv_bandwidth_highest;
     GLint m_frame_texture_filtering = GL_LINEAR;
+    float m_audio_volume = 1.0f;
+    bool m_audio_muted = true;
+    // Initialized at -1, so that if we receive a timecode of 0, we properly take that first frame.
+    // This timecode is seen always and constantly by the Test Patterns NDI Tool
+    int64_t m_frame_timecode = -1;
 
-    void create_receiver(NDIlib_recv_bandwidth_e);
+    void create_receiver_and_framesync(NDIlib_recv_bandwidth_e);
     void receive();
     void set_frame_texture_filtering(GLint);
 };

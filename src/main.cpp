@@ -7,6 +7,8 @@
 #include "Application.h"
 #include "NDI.h"
 #include <GLFW/glfw3.h>
+#define MINIAUDIO_IMPLEMENTATION
+#include <miniaudio.h>
 #include <stdio.h>
 #include <stdlib.h>
 
