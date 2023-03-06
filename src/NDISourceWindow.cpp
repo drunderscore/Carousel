@@ -103,13 +103,16 @@ bool NDISourceWindow::update()
     {
         if (ImGui::BeginMenu("Bandwidth"))
         {
-            if (ImGui::MenuItem("Highest", nullptr, m_receiver_bandwidth == NDIlib_recv_bandwidth_highest))
+            auto is_highest_bandwidth_enabled = m_receiver_bandwidth == NDIlib_recv_bandwidth_highest;
+            auto is_lowest_bandwidth_enabled = m_receiver_bandwidth == NDIlib_recv_bandwidth_lowest;
+
+            if (ImGui::MenuItem("Highest", nullptr, is_highest_bandwidth_enabled, !is_highest_bandwidth_enabled))
             {
                 m_receiver_bandwidth = NDIlib_recv_bandwidth_highest;
                 create_receiver_and_framesync(m_receiver_bandwidth);
             }
 
-            if (ImGui::MenuItem("Lowest", nullptr, m_receiver_bandwidth == NDIlib_recv_bandwidth_lowest))
+            if (ImGui::MenuItem("Lowest", nullptr, is_lowest_bandwidth_enabled, !is_lowest_bandwidth_enabled))
             {
                 m_receiver_bandwidth = NDIlib_recv_bandwidth_lowest;
                 create_receiver_and_framesync(m_receiver_bandwidth);
@@ -120,13 +123,16 @@ bool NDISourceWindow::update()
 
         if (ImGui::BeginMenu("Filtering"))
         {
-            if (ImGui::MenuItem("Linear", nullptr, m_frame_texture_filtering == GL_LINEAR))
+            auto is_using_linear_filtering = m_frame_texture_filtering == GL_LINEAR;
+            auto is_using_nearest_filtering = m_frame_texture_filtering == GL_NEAREST;
+
+            if (ImGui::MenuItem("Linear", nullptr, is_using_linear_filtering, !is_using_linear_filtering))
             {
                 m_frame_texture_filtering = GL_LINEAR;
                 set_frame_texture_filtering(m_frame_texture_filtering);
             }
 
-            if (ImGui::MenuItem("Nearest", nullptr, m_frame_texture_filtering == GL_NEAREST))
+            if (ImGui::MenuItem("Nearest", nullptr, is_using_nearest_filtering, !is_using_nearest_filtering))
             {
                 m_frame_texture_filtering = GL_NEAREST;
                 set_frame_texture_filtering(m_frame_texture_filtering);
