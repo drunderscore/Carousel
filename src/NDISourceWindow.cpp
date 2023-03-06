@@ -18,7 +18,14 @@ NDISourceWindow::NDISourceWindow(const NDIlib_source_t& source) : m_source(sourc
     set_frame_texture_filtering(m_frame_texture_filtering);
 }
 
-NDISourceWindow::~NDISourceWindow() { NDIlib_recv_destroy(m_receiver_instance); }
+NDISourceWindow::~NDISourceWindow()
+{
+    if (m_receiver_instance)
+    {
+        NDIlib_recv_destroy(m_receiver_instance);
+        m_receiver_instance = nullptr;
+    }
+}
 
 bool NDISourceWindow::update()
 {
@@ -118,7 +125,10 @@ bool NDISourceWindow::update()
 void NDISourceWindow::create_receiver(NDIlib_recv_bandwidth_e bandwidth)
 {
     if (m_receiver_instance)
+    {
         NDIlib_recv_destroy(m_receiver_instance);
+        m_receiver_instance = nullptr;
+    }
 
     NDIlib_recv_create_v3_t receiver_create{};
     // RGB(A) is likely the worst format for bandwidth reasons, but was the simplest to get going with. probably
