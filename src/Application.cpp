@@ -212,7 +212,13 @@ int Application::run()
                         //        device IDs with miniaudio? Doesn't seem to be an API for this...
                         if (ImGui::MenuItem(playback_device_info.name, nullptr, is_current_playback_device,
                                             !is_current_playback_device))
-                            initialize_playback_device(&playback_device_info);
+                        {
+                            if (!initialize_playback_device(&playback_device_info))
+                            {
+                                fprintf(stderr, "Failed to initialize chosen playback device %s\n",
+                                        playback_device_info.name);
+                            }
+                        }
                     }
 
                     ImGui::EndMenu();
