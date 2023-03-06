@@ -21,10 +21,16 @@ Application::Application()
 {
     JMP::ScopeGuard free_if_error_occurs([this]() {
         if (m_window)
+        {
             glfwDestroyWindow(m_window);
+            m_window = nullptr;
+        }
 
         if (m_ndi_finder_instance)
+        {
             NDIlib_find_destroy(m_ndi_finder_instance);
+            m_ndi_finder_instance = nullptr;
+        }
     });
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -64,7 +70,12 @@ Application::Application()
 Application::~Application()
 {
     glfwDestroyWindow(m_window);
-    NDIlib_find_destroy(m_ndi_finder_instance);
+
+    if (m_ndi_finder_instance)
+    {
+        NDIlib_find_destroy(m_ndi_finder_instance);
+        m_ndi_finder_instance = nullptr;
+    }
 }
 
 int Application::run()
@@ -174,6 +185,12 @@ int Application::run()
 
 void Application::create_finder()
 {
+    if (m_ndi_finder_instance)
+    {
+        NDIlib_find_destroy(m_ndi_finder_instance);
+        m_ndi_finder_instance = nullptr;
+    }
+
     if (!(m_ndi_finder_instance = NDIlib_find_create_v2()))
         throw std::runtime_error("Failed to create NDI finder instance");
 }
