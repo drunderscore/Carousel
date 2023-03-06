@@ -153,6 +153,9 @@ bool NDISourceWindow::update()
             ImGui::EndMenu();
         }
 
+        if (ImGui::MenuItem("Reconnect"))
+            create_receiver_and_framesync(m_receiver_bandwidth);
+
         ImGui::EndPopup();
     }
 
