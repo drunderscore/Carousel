@@ -22,13 +22,17 @@ public:
         friend class NDISourceWindow;
 
     public:
-        Source(const NDIlib_source_t& source) : m_name(source.p_ndi_name), m_url_address(source.p_url_address) {}
+        explicit Source(const NDIlib_source_t& source) : m_name(source.p_ndi_name), m_url_address(source.p_url_address)
+        {
+        }
 
         std::string_view name() const { return m_name; }
         std::string_view url_address() const { return m_url_address; }
 
-        bool operator==(const Source& rhs) const { return name() == rhs.name() && url_address() == rhs.url_address(); }
-        bool operator!=(const Source& rhs) const { return !(rhs == *this); }
+        bool operator==(const NDIlib_source_t& rhs) const
+        {
+            return name() == rhs.p_ndi_name && url_address() == rhs.p_url_address;
+        }
 
     private:
         std::string m_name;
